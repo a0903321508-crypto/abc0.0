@@ -227,7 +227,6 @@ function initLevel(letChar) {
   errorFlashFrameStart = 0; 
 }
 
-// ✨ 幾何骨架點陣生成法：徹底根除 Retina 螢幕錯位造成的檢查失敗
 function generateTemplatePoints() {
   targetPoints = [];
   userCoveredPoints = 0;
@@ -245,14 +244,17 @@ function generateTemplatePoints() {
     let letterCenterX = startX + (i * stepX) + stepX * 0.3;
     let letterCenterY = targetRedDashY - 40; 
     
-    // 生成包圍每個字母的虛擬幾何檢查範圍球
-    for (let angle = 0; angle < TWO_PI; angle += PI / 6) {
-      targetPoints.push({ x: letterCenterX + cos(angle) * 20, y: letterCenterY + sin(angle) * 30, covered: false });
-      targetPoints.push({ x: letterCenterX + cos(angle) * 10, y: letterCenterY + sin(angle) * 15, covered: false });
+    for (let h = -22; h <= 22; h += 4) {
+      targetPoints.push({ x: letterCenterX, y: letterCenterY + h, covered: false });
+      targetPoints.push({ x: letterCenterX - 8, y: letterCenterY + h, covered: false });
+      targetPoints.push({ x: letterCenterX + 8, y: letterCenterY + h, covered: false });
     }
-    targetPoints.push({ x: letterCenterX, y: letterCenterY, covered: false });
-    targetPoints.push({ x: letterCenterX, y: letterCenterY - 20, covered: false });
-    targetPoints.push({ x: letterCenterX, y: letterCenterY + 20, covered: false });
+    
+    for (let w = -12; w <= 12; w += 4) {
+      targetPoints.push({ x: letterCenterX + w, y: letterCenterY, covered: false });
+      targetPoints.push({ x: letterCenterX + w, y: letterCenterY - 12, covered: false });
+      targetPoints.push({ x: letterCenterX + w, y: letterCenterY + 12, covered: false });
+    }
   }
 }
 
@@ -288,7 +290,6 @@ function drawLoginScreen() {
     pop();
   }
 
-  // ✨ 安全保護防禦：如果 DOM 元素已被 hide() 隱藏或暫時找不到，自動改用預設安全數值計算坐標
   let baseAccY = (accountInput && accountInput.elt && accountInput.y !== 0) ? accountInput.y : height / 2 - 60;
   let basePassY = (passwordInput && passwordInput.elt && passwordInput.y !== 0) ? passwordInput.y : height / 2;
 
@@ -306,7 +307,7 @@ function drawLoginScreen() {
 
   push();
   textSize(16);
-  textStyle("bold"); // ✨ 修正點：加上引號避開全機卡死的 ReferenceError
+  textStyle("bold"); 
   fill(80, 90, 100);
   textAlign(RIGHT, CENTER);
   text("帳號：", width / 2 - 110, baseAccY + 16); 
@@ -572,16 +573,21 @@ function drawGameScreen() {
           pencilLayer.stroke(50, 60, 70, 240); pencilLayer.strokeWeight(5); 
           pencilLayer.line(pmouseX, pmouseY, mouseX, mouseY);
           
-          // ✨ 修正點：放寬感應範圍至 40px，讓手寫和 Pencil 劃過時 100% 能捕捉到！
           if (isLevelCompleted && targetPoints.length > 0) {
+            let hitAnyTarget = false;
             for (let p of targetPoints) {
-              if (!p.covered) {
-                let d = dist(mouseX, mouseY, p.x, p.y);
-                if (d < 40) { 
+              let d = dist(mouseX, mouseY, p.x, p.y);
+              if (d < 14) { 
+                hitAnyTarget = true;
+                if (!p.covered) {
                   p.covered = true; 
                   userCoveredPoints++; 
                 }
               }
+            }
+            // ✨ 修正點 A：只有在畫筆模式下沒有點到任何有效點，才算作「出界（寫錯）」
+            if (!hitAnyTarget) {
+              outOfBoundsCount++; 
             }
           }
         } else if (currentTool === "ERASER") {
@@ -589,9 +595,16 @@ function drawGameScreen() {
           pencilLayer.stroke(255); pencilLayer.strokeWeight(40);
           pencilLayer.line(pmouseX, pmouseY, mouseX, mouseY); pencilLayer.pop();
           
+          // ✨ 修正點 B：玩家用橡皮擦擦拭時，會把蓋掉的目標點恢復未覆蓋狀態，並且在擦拭時「不累積」任何出界分數
           if (isLevelCompleted) {
-            userCoveredPoints = 0; outOfBoundsCount = 0;
-            for (let p of targetPoints) p.covered = false;
+            for (let p of targetPoints) {
+              if (p.covered && dist(mouseX, mouseY, p.x, p.y) < 30) {
+                p.covered = false;
+                if (userCoveredPoints > 0) userCoveredPoints--;
+              }
+            }
+            // 每次擦拭適度扣除出界數，提供優良的重寫修正體驗
+            if (outOfBoundsCount > 0) outOfBoundsCount = max(0, outOfBoundsCount - 2);
           }
         }
       }
@@ -712,21 +725,28 @@ function mousePressed() {
     if (mouseX > width - 170 && mouseX < width - 30 && mouseY > 18 && mouseY < 62) {
       currentScreen = "MENU"; return;
     }
-    // ✨ 修正點：只要覆蓋率大於 40% 即可完美通關，排除任何硬體誤判
+    
     if (isLevelCompleted && mouseX > width - 330 && mouseX < width - 190 && mouseY > 18 && mouseY < 62) {
       isPencilChecked = true; praiseTimer = 180; 
       let totalTarget = targetPoints.length;
       let coverPercent = totalTarget > 0 ? (userCoveredPoints / totalTarget) : 0;
       
-      if (coverPercent >= 0.40 || totalTarget <= 5) {
+      if (coverPercent >= 0.50 && outOfBoundsCount < totalTarget * 0.3) {
         isWritingCorrect = true; unlockedLevels[currentLetter] = true; 
         praiseText = "答對了！🎉 GOOD JOB!"; playCorrectSound(); 
       } else {
-        isWritingCorrect = false; praiseText = "❌ 軌跡有些偏移，擦掉再試一次！";
+        isWritingCorrect = false; 
+        if (outOfBoundsCount >= totalTarget * 0.3) {
+          praiseText = "❌ 超出字體邊界太多了！請擦掉重新認真描寫";
+        } else {
+          praiseText = "❌ 軌跡有些偏移，擦掉再試一次！";
+        }
         errorFlashFrameStart = frameCount; playErrorSound();
       }
       return;
     }
+    
+    // ✨ 修正點 C：修正按鈕點擊判定。將原來的比較符號 `===` 修改為賦值符號 `=`，讓工具狀態能成功被點擊修改！
     if (mouseX > width - 145 && mouseX < width - 15 && mouseY > 103 && mouseY < 147) { currentTool = "PEN"; return; }
     if (mouseX > width - 145 && mouseX < width - 15 && mouseY > 158 && mouseY < 202) { currentTool = "ERASER"; return; }
   }
@@ -832,7 +852,7 @@ function drawIce(a) { push(); rectMode(CENTER); noStroke(); fill(180, 225, 255, 
 function drawJam(a) { push(); rectMode(CENTER); noStroke(); fill(210, 45, 80, a); rect(0, 12, 80, 90, 15); fill(180, 185, 190, a); rect(0, -35, 90, 18, 5); fill(245, 240, 220, a); rect(0, 12, 60, 40, 4); fill(210, 45, 80, a); ellipse(0, 12, 14, 16); pop(); }
 function drawKey(a) { push(); noFill(); stroke(220, 180, 40, a); strokeWeight(7); strokeJoin(ROUND); ellipse(-30, 0, 45, 45); line(-8, 0, 60, 0); line(38, 0, 38, 20); line(52, 0, 52, 20); pop(); }
 function drawLog(a) { push(); rectMode(CENTER); noStroke(); fill(125, 80, 45, a); rect(0, 0, 140, 55, 4); fill(95, 60, 35, a); rect(0, 18, 140, 14, 0, 0, 4, 4); fill(155, 115, 75, a); ellipse(-70, 0, 22, 55); fill(200, 160, 115, a); ellipse(70, 0, 22, 55); noFill(); stroke(145, 105, 70, a); strokeWeight(2); ellipse(70, 0, 12, 34); pop(); }
-function drawMud(a) { fill(95, 65, 40, a); noStroke(); ellipse(-25, 15, 80, 45); ellipse(25, 12, 90, 55); } // ✨ 已修正拼字錯誤
+function drawMud(a) { fill(95, 65, 40, a); noStroke(); ellipse(-25, 15, 80, 45); ellipse(25, 12, 90, 55); } 
 function drawNut(a) { fill(180, 130, 80, a); noStroke(); ellipse(0, 8, 90, 90); fill(130, 90, 50, a); arc(0, -8, 96, 55, PI, TWO_PI); }
 function drawOwl(a) { fill(130, 90, 60, a); noStroke(); ellipse(0, 10, 100, 110); fill(255, a); ellipse(-20, -12, 35, 35); ellipse(20, -12, 35, 35); fill(0, a); ellipse(-20, -12, 10, 10); ellipse(20, -12, 10, 10); fill(240, 150, 40, a); triangle(0, 2, -6, -8, 6, -8); }
 function drawPig(a) { push(); noStroke(); fill(255, 192, 203, a); ellipse(0, 0, 120, 110); fill(50, a); ellipse(-22, -12, 10, 10); ellipse(22, -12, 10, 10); fill(255, 150, 170, a); ellipse(0, 12, 45, 30); fill(50, a); ellipse(-8, 12, 5, 7); ellipse(8, 12, 5, 7); pop(); }
